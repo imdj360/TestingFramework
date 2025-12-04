@@ -106,7 +106,7 @@ namespace LogicAppUnit
         /// <param name="workflowName">The name of the workflow. This matches the name of the folder that contains the workflow definition file.</param>
         protected void Initialize(string logicAppBasePath, string workflowName)
         {
-            Initialize(logicAppBasePath, workflowName, null);
+            Initialize(logicAppBasePath, workflowName, null, null);
         }
 
         /// <summary>
@@ -115,7 +115,10 @@ namespace LogicAppUnit
         /// <param name="logicAppBasePath">Path to the root folder containing the workflows.</param>
         /// <param name="workflowName">The name of the workflow. This matches the name of the folder that contains the workflow definition file.</param>
         /// <param name="localSettingsFilename">The name of the local settings file to be used, this can be used to override the default of <i>local.settings.json</i>.</param>
-        protected void Initialize(string logicAppBasePath, string workflowName, string localSettingsFilename)
+        /// <param name="testProjectPath">Path to the test project containing test-specific configuration files. If not specified, defaults to current directory.</param>
+        /// <param name="parametersFilename">The name of the parameters file to be used (e.g., 'parameterA.json'). If not specified, defaults to 'parameters.json'.</param>
+        /// <param name="connectionsFilename">The name of the connections file to be used (e.g., 'connectionA.json'). If not specified, defaults to 'connections.json'.</param>
+        protected void Initialize(string logicAppBasePath, string workflowName, string localSettingsFilename = null, string testProjectPath = null, string parametersFilename = null, string connectionsFilename = null)
         {
             if (string.IsNullOrEmpty(logicAppBasePath))
                 throw new ArgumentNullException(nameof(logicAppBasePath));
@@ -145,11 +148,18 @@ namespace LogicAppUnit
             if (_testConfig.Azurite.EnableAzuritePortCheck && !AzuriteHelper.IsRunning(_testConfig.Azurite))
                 throw new TestException($"Azurite is not running on ports {_testConfig.Azurite.BlobServicePort} (Blob service), {_testConfig.Azurite.QueueServicePort} (Queue service) and {_testConfig.Azurite.TableServicePort} (Table service). Logic App workflows cannot run unless all three services are running in Azurite");
 
+            // Default test project path to current directory if not specified
+            testProjectPath = testProjectPath ?? Directory.GetCurrentDirectory();
+
+            // Set default filenames if not specified
+            parametersFilename = parametersFilename ?? Constants.PARAMETERS;
+            connectionsFilename = connectionsFilename ?? Constants.CONNECTIONS;
+
             // Process the workflow definition, local settings, parameters and connection files
             ProcessWorkflowDefinitionFile(logicAppBasePath, workflowName);
-            ProcessLocalSettingsFile(logicAppBasePath, localSettingsFilename);
-            ProcessParametersFile(logicAppBasePath);
-            ProcessConnectionsFile(logicAppBasePath);
+            ProcessLocalSettingsFile(logicAppBasePath, localSettingsFilename, testProjectPath);
+            ProcessParametersFile(logicAppBasePath, testProjectPath, parametersFilename);
+            ProcessConnectionsFile(logicAppBasePath, testProjectPath, connectionsFilename);
 
             // Set up the artifacts (schemas, maps) and custom library folders
             _artifactDirectory = SetSourceDirectory(logicAppBasePath, Constants.ARTIFACTS_FOLDER, "artifacts");
@@ -241,6 +251,38 @@ namespace LogicAppUnit
 
         #endregion Create test runner
 
+        #region Helper methods
+
+        /// <summary>
+        /// Resolves the configuration file path by checking the test project path first, then falling back to the Logic App path.
+        /// </summary>
+        /// <param name="logicAppBasePath">Path to the root folder containing the workflows.</param>
+        /// <param name="testProjectPath">Path to the test project containing test-specific configuration files.</param>
+        /// <param name="fileName">The name of the configuration file to locate.</param>
+        /// <returns>The full path to the configuration file, or null if not found.</returns>
+        private string ResolveConfigurationFilePath(string logicAppBasePath, string testProjectPath, string fileName)
+        {
+            // Check test project first
+            var testProjectFilePath = Path.Combine(testProjectPath, fileName);
+            if (File.Exists(testProjectFilePath))
+            {
+                Console.WriteLine($"Using configuration file from test project: {testProjectFilePath}");
+                return testProjectFilePath;
+            }
+
+            // Fall back to Logic App project
+            var logicAppFilePath = Path.Combine(logicAppBasePath, fileName);
+            if (File.Exists(logicAppFilePath))
+            {
+                Console.WriteLine($"Using configuration file from Logic App project: {logicAppFilePath}");
+                return logicAppFilePath;
+            }
+
+            return null;
+        }
+
+        #endregion Helper methods
+
         #region Source file processing
 
         /// <summary>
@@ -272,35 +314,51 @@ namespace LogicAppUnit
 
         /// <summary>
         /// Process a workflow local settings file before the test is run.
+        /// Files in the test project path take precedence over files in the Logic App project.
         /// </summary>
         /// <param name="logicAppBasePath">Path to the root folder containing the workflows.</param>
         /// <param name="localSettingsFilename">The name of the local settings file to be used, this can be used to override the default of <i>local.settings.json</i>.</param>
-        private void ProcessLocalSettingsFile(string logicAppBasePath, string localSettingsFilename)
+        /// <param name="testProjectPath">Path to the test project containing test-specific configuration files.</param>
+        private void ProcessLocalSettingsFile(string logicAppBasePath, string localSettingsFilename, string testProjectPath)
         {
             // The name of the local setting file can be set in the test configuration
-            _localSettings = new LocalSettingsWrapper(ReadFromPath(Path.Combine(logicAppBasePath, SetLocalSettingsFile(localSettingsFilename))));
+            var fileName = SetLocalSettingsFile(localSettingsFilename);
+            var filePath = ResolveConfigurationFilePath(logicAppBasePath, testProjectPath, fileName);
+            
+            if (filePath == null)
+                throw new TestException($"The local settings file '{fileName}' does not exist in test project '{testProjectPath}' or Logic App project '{logicAppBasePath}'");
+
+            _localSettings = new LocalSettingsWrapper(ReadFromPath(filePath));
 
             _localSettings.ReplaceExternalUrlsWithMockServer(_testConfig.Workflow.ExternalApiUrlsToMock);
         }
 
         /// <summary>
         /// Process a workflow parameters file before the test is run.
+        /// Files in the test project path take precedence over files in the Logic App project.
         /// </summary>
         /// <param name="logicAppBasePath">Path to the root folder containing the workflows.</param>
-        private void ProcessParametersFile(string logicAppBasePath)
+        /// <param name="testProjectPath">Path to the test project containing test-specific configuration files.</param>
+        /// <param name="parametersFilename">The name of the parameters file to be used.</param>
+        private void ProcessParametersFile(string logicAppBasePath, string testProjectPath, string parametersFilename)
         {
-            _parameters = new ParametersWrapper(ReadFromPath(Path.Combine(logicAppBasePath, Constants.PARAMETERS), optional: true));
+            var filePath = ResolveConfigurationFilePath(logicAppBasePath, testProjectPath, parametersFilename);
+            _parameters = new ParametersWrapper(ReadFromPath(filePath, optional: true));
         }
 
         /// <summary>
         /// Process a workflow connections file before the test is run.
+        /// Files in the test project path take precedence over files in the Logic App project.
         /// </summary>
         /// <param name="logicAppBasePath">Path to the root folder containing the workflows.</param>
-        private void ProcessConnectionsFile(string logicAppBasePath)
+        /// <param name="testProjectPath">Path to the test project containing test-specific configuration files.</param>
+        /// <param name="connectionsFilename">The name of the connections file to be used.</param>
+        private void ProcessConnectionsFile(string logicAppBasePath, string testProjectPath, string connectionsFilename)
         {
             const string invalidConnectionsMsg = "configured to use the 'ManagedServiceIdentity' authentication type. Only the 'Raw' and 'ActiveDirectoryOAuth' authentication types are allowed in a local developer environment";
 
-            _connections = new ConnectionsWrapper(ReadFromPath(Path.Combine(logicAppBasePath, Constants.CONNECTIONS), optional: true), _localSettings, _parameters);
+            var filePath = ResolveConfigurationFilePath(logicAppBasePath, testProjectPath, connectionsFilename);
+            _connections = new ConnectionsWrapper(ReadFromPath(filePath, optional: true), _localSettings, _parameters);
 
             _connections.ReplaceManagedApiConnectionUrlsWithMockServer(_testConfig.Workflow.ManagedApisToMock);
 

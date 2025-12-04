@@ -1,3 +1,15 @@
+# 1.13.0 (4th December 2025)
+
+LogicAppUnit Testing Framework:
+
+- Added support for custom configuration files in test projects. The `Initialize()` method now accepts optional parameters to specify custom filenames for `local.settings.json`, `parameters.json`, and `connections.json`. Configuration files are resolved by checking the test project directory first, then falling back to the Logic App project directory. This allows tests to use test-specific configurations that override the Logic App project defaults. This enables unified test suites across environments - use the same test code for DEV, QA, and PROD by simply swapping configuration files (e.g., `parameters-dev.json`, `parameters-qa.json`, `parameters-prod.json`).
+
+LogicAppUnit.Samples.LogicApps.Tests:
+
+- Added example custom configuration files (`local.settings-custom.json`, `parameters-custom.json`, `connections-custom.json`) in the test project.
+- Added `HttpWorkflowCustomConfigTest`, `BuiltInConnectorWorkflowCustomConfigTest`, and `ManagedApiConnectorWorkflowCustomConfigTest` to demonstrate the custom configuration file feature.
+
+
 # 1.12.0 (18th July 2025)
 
 LogicAppUnit Testing Framework:
