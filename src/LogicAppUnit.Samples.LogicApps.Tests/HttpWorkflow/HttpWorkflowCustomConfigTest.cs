@@ -29,7 +29,8 @@ namespace LogicAppUnit.Samples.LogicApps.Tests.HttpWorkflow
                 Constants.LOGIC_APP_TEST_EXAMPLE_BASE_PATH,
                 Constants.HTTP_WORKFLOW,
                 localSettingsFilename: "local.settings-custom.json",
-                parametersFilename: "parameters-custom.json"
+                parametersFilename: "parameters-custom.json",
+                connectionsFilename: "connections-custom.json"
             );
         }
 
